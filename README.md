@@ -1,194 +1,75 @@
 # FastAPI Service Base
 
-A starting point for FastAPI microservices. Clone it, name it, turn on what you
-need, start writing endpoints.
+A starting point for FastAPI microservices: layered structure, async
+PostgreSQL/MySQL, Redis, structured logging, health checks and one response
+shape for successes and errors. Everything external is opt-in, so a fresh clone
+runs with no database and no Redis.
 
-**Everything external is opt-in.** A fresh clone runs with no database and no
-Redis.
+## Quick start
+
+Needs [uv](https://docs.astral.sh/uv/).
 
 ```bash
 cp .env.example .env
 uv sync --all-extras --group dev
-uv run python main.py          # open http://localhost:8000/docs
+uv run python main.py          # http://localhost:8000/docs
 ```
-
-> Needs [uv](https://docs.astral.sh/uv/):
-> `curl -LsSf https://astral.sh/uv/install.sh | sh`
-
----
 
 ## Start a new service
 
-1. **Copy it** with GitHub's *Use this template*, or clone and reset history:
-   `git clone <this-repo> my-service && cd my-service && rm -rf .git && git init`
-2. **Name it:** `name`, `description`, `authors` in `pyproject.toml`;
-   `APP_NAME`, `APP_VERSION` in `.env`.
-3. **Install:** `uv sync --all-extras --group dev && uv run pre-commit install`
-4. **Turn on what you need** in `.env`: `DB_ENABLED`, `REDIS_ENABLED`.
-5. **Check it works:** `uv run pytest`, then `uv run python main.py`.
-6. **Delete what you won't use** — see [the last section](#deleting-what-you-dont-need).
-
----
+1. Click **Use this template** on GitHub, or clone and run `rm -rf .git && git init`.
+2. Rename it in `pyproject.toml` and set `APP_NAME` in `.env`.
+3. Run `uv run pre-commit install`.
+4. Turn on what you need in `.env`: `DB_ENABLED`, `REDIS_ENABLED`.
 
 ## Commands
 
 | Task | Command |
 |---|---|
-| Run the API | `uv run python main.py` |
 | Run tests | `uv run pytest` |
-| Lint and format | `uv run ruff check --fix . && uv run ruff format .` |
-| Type check | `uv run mypy app` |
-| All pre-commit hooks | `uv run pre-commit run --all-files` |
+| Lint, format, type check | `uv run pre-commit run --all-files` |
 | New migration | `uv run alembic revision --autogenerate -m "add users"` |
 | Apply migrations | `uv run alembic upgrade head` |
-| Roll back one | `uv run alembic downgrade -1` |
-| Start with Docker | `docker compose up --build -d` |
-| Stop Docker | `docker compose down -v` |
-
----
-
-## Configuration
-
-All settings are in one class, `app/settings.py`, and every field name matches
-its environment variable exactly (`DB_HOST` in code is `DB_HOST` in `.env`).
-Defaults and descriptions are in `.env.example`.
-
-Bad configuration stops the app at startup, not in the middle of the night:
-a sync `DB_DRIVER` or missing DB credentials are rejected at boot. API docs are
-always off in production.
-
----
+| Run with Docker | `docker compose up --build -d` |
 
 ## Project layout
 
 ```
 app/
-├── application.py      builds the app: middleware, error handlers, routers
-├── lifetime.py         opens and closes DB/Redis around the app's life
-├── settings.py         all configuration
-├── router.py           mounts your routers under /api/v1
-├── clients/            database/ and redis/ connections
-├── db/                 models/ (tables) and services/ (queries)
-├── controllers/        HTTP only: one class-based (@cbv) controller per feature
-├── services/           business logic: one <feature>_service.py class per feature
-├── helpers/            non-business code services reuse: <topic>_helper.py
-├── schemas/            request/ and response/ models
-├── constants/          enums and messages
-├── exceptions/         error classes and handlers
-├── middleware/         request id, timing, access log
-└── log/                console and JSON log formats
+├── controllers/   HTTP only: one @cbv class per feature
+├── services/      business logic
+├── helpers/       non-business code that services reuse
+├── db/            models/ (tables) and services/ (queries)
+├── schemas/       request/ and response/ models
+├── exceptions/    error classes and handlers
+├── clients/       database and Redis connections
+├── settings.py    all configuration (field names = env var names)
+└── router.py      mounts routers under /api/v1
 ```
-
----
 
 ## Adding an endpoint
 
-Use `app/controllers/health_controller.py` as the reference pattern. Each
-layer has one job, so new code always goes in one of these folders:
+Follow `app/controllers/health_controller.py`:
 
-1. **Model** (if it needs a table): `app/db/models/<name>.py`, then import it in
-   `app/db/models/__init__.py` — Alembic can't see models that aren't imported.
-2. **Schemas:** `app/schemas/request/<name>_request.py` and
-   `app/schemas/response/<name>_response.py`.
-3. **Queries:** a class in `app/db/services/<name>_db_service.py`.
-4. **Business logic:** a class in `app/services/<name>_service.py` that takes
-   the clients it needs in `__init__`. See the example in
-   `app/services/__init__.py`.
-5. **Helpers** (if needed): code that isn't business logic, such as parsing or
-   calling another system, in `app/helpers/<topic>_helper.py`.
-6. **Controller:** a `@cbv` class in `app/controllers/<name>_controller.py`,
-   HTTP only. Each method takes a session with `DBSession` or Redis with
-   `RedisDep`, creates the service, calls it and returns
-   `BaseResponse[YourResponse]`.
-7. **Mount it** in `app/router.py` (there's a commented example).
-8. **Migrate:** `uv run alembic revision --autogenerate -m "add <name>"`,
-   then `uv run alembic upgrade head`.
+1. **Model** in `app/db/models/` and import it in `app/db/models/__init__.py`,
+   so Alembic can see it.
+2. **Schemas** in `app/schemas/request/` and `app/schemas/response/`.
+3. **Queries** in `app/db/services/`, **business logic** in `app/services/`.
+4. **Controller** in `app/controllers/`, taking `DBSession` or `RedisDep` and
+   returning `BaseResponse[YourResponse]`.
+5. **Mount it** in `app/router.py`, then create and apply a migration.
 
-Don't create other top-level folders under `app/` for feature code; pick the
-layer it belongs to instead.
+## Conventions
 
-Every successful response has the same shape:
-
-```json
-{
-  "message": "Service is healthy",
-  "payload": { "service": "FastAPI Service", "timestamp": "2026-09-30T10:47:16Z" },
-  "status": 200,
-  "detail": null
-}
-```
-
----
-
-## Database and Redis
-
-- **Engine:** `DB_DRIVER` picks it — `postgresql+asyncpg` (`uv sync --extra postgres`)
-  or `mysql+aiomysql` (`uv sync --extra mysql`). No code changes between them.
-- **Transactions:** one per request. The session commits on success and rolls
-  back on error, so **handlers should not commit**.
-- **Tables:** every table gets `id`, `uuid`, `created_at` and `updated_at` from
-  `BaseModel`.
-- **Redis:** any Redis-compatible server works (Valkey, DragonflyDB).
-
-> **Don't run migrations on app startup.** With several replicas they all try
-> to migrate at once and crash. Run `alembic upgrade head` as its own deploy
-> step.
-
----
-
-## Errors
-
-Raise the classes in `app/exceptions`, never `HTTPException`:
-`BadRequestError`, `UnauthorizedError`, `ForbiddenError`, `NotFoundError`,
-`ConflictError`, `UnprocessableEntityError`, `TooManyRequestsError`,
-`ExternalServiceError`, `ServiceUnavailableError`.
-
-Errors use the same `message`, `payload`, `status`, `detail` envelope as
-successful responses, with `payload` null. `detail` holds a stable `code` to
-branch on, any per-field `errors`, and a `request_id` to find its log.
-Unexpected errors return a generic message, so internal details never leak to
-the caller.
-
----
-
-## Logging and health
-
-Every request gets an id (reused from an incoming `X-Request-ID`), which shows
-in every log line, every error and the response header. Set
-`APP_LOG_FORMAT=json` for log tools, or `console` for local work.
-
-| Endpoint | Purpose |
-|---|---|
-| `GET /health` | Liveness: is the process up? Never checks dependencies. |
-| `GET /health/detailed` | Readiness: checks DB/Redis, returns 503 if one is down. |
-| `GET /version` | Name, version, environment. |
-
-> **Keep liveness and readiness separate.** If liveness checked the database, a
-> short DB blip would restart every replica at once.
-
----
-
-## Docker
-
-`docker compose up --build -d` starts `api`, `postgres` and `redis`, with
-credentials from `.env`.
-
-- **Image:** multi-stage, runs as a non-root user, and its health check uses
-  `/health`.
-- **Rebuilds:** dependencies are cached, so code-only changes rebuild in about
-  a second.
-- **MySQL:** swap in the commented `mysql` service in `docker-compose.yml` and
-  build with `--build-arg EXTRAS="mysql redis"`.
-
----
-
-## Deleting what you don't need
-
-| Not needed | Delete |
-|---|---|
-| Database | `app/clients/database/`, `app/db/`, `alembic/`, `alembic.ini` |
-| Redis | `app/clients/redis/` |
-| Docker | `Dockerfile`, `docker-compose.yml`, `.dockerignore` |
-
-Then remove its `DB_*` or `REDIS_*` fields from `app/settings.py`, its block in
-`app/lifetime.py`, and its check in `app/controllers/health_controller.py`.
+- **Responses**: every response, success or error, has the shape
+  `{ "message", "payload", "status", "detail" }`.
+- **Errors**: raise the classes in `app/exceptions` (`NotFoundError`,
+  `ConflictError`, ...), not `HTTPException`. Unexpected errors never leak
+  internals.
+- **Transactions**: one per request, committed before the response is sent and
+  rolled back on error. Handlers don't commit.
+- **Migrations**: run `alembic upgrade head` as a deploy step, not on startup.
+- **Health**: `/health` is liveness and never checks dependencies.
+  `/health/detailed` is readiness and returns 503 if the DB or Redis is down.
+- **Logging**: every request gets an id from `X-Request-ID` (or a new one),
+  shown in each log line and error. Set `APP_LOG_FORMAT=json` in production.

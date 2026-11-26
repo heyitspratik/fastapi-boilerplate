@@ -22,5 +22,5 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
         yield session
 
 
-#: Annotate handler parameters with this instead of repeating ``Depends``.
-DBSession = Annotated[AsyncSession, Depends(get_db)]
+#: ``scope="function"``: commit before the response and background tasks.
+DBSession = Annotated[AsyncSession, Depends(get_db, scope="function")]
